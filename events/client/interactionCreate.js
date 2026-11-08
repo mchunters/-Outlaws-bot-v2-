@@ -84,6 +84,16 @@ module.exports = {
           `🔘 Button clicked: ${interaction.customId} | User: ${interaction.user.tag}`
         );
 
+        // Route Outlaws war buttons to their dedicated handler.
+        if (
+          interaction.customId === 'outlaws-war-start' ||
+          interaction.customId === 'outlaws-war-end'
+        ) {
+          const { handleWarButton } = require('../../functions/warSystem');
+          await handleWarButton(interaction);
+          return;
+        }
+
         return;
       }
 
