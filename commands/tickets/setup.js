@@ -1,77 +1,132 @@
+
 const {
   SlashCommandBuilder,
   PermissionFlagsBits,
   ChannelType,
 } = require('discord.js');
+
 const TicketSettings = require('../../models/TicketSettings');
 
+const data = new SlashCommandBuilder()
+  .setName('ticketsetup')
+  .setDescription('Configure the Outlaws ticket system')
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+
+  .addChannelOption(option =>
+    option
+      .setName('category')
+      .setDescription('Category for tickets')
+      .addChannelTypes(ChannelType.GuildCategory)
+      .setRequired(true)
+  )
+
+  .addChannelOption(option =>
+    option
+      .setName('logs')
+      .setDescription('Channel for ticket logs')
+      .addChannelTypes(ChannelType.GuildText)
+      .setRequired(true)
+  )
+
+  .addRoleOption(option =>
+    option
+      .setName('support_role_1')
+      .setDescription('First staff role (required)')
+      .setRequired(true)
+  );
+
+for (let i = 2; i <= 10; i++) {
+  data.addRoleOption(option =>
+    option
+      .setName(`support_role_${i}`)
+      .setDescription(`Additional staff role ${i}`)
+      .setRequired(false)
+  );
+}
+
+data.addIntegerOption(option =>
+  option
+    .setName('limit')
+    .setDescription('Maximum tickets per user')
+    .setMinValue(1)
+    .setMaxValue(10)
+    .setRequired(false)
+);
+
 module.exports = {
-  data: new SlashCommandBuilder()
-    .setName('ticketsetup')
-    .setDescription('Configure the ticket system')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addRoleOption((option) =>
-      option
-        .setName('support_role')
-        .setDescription('Role that can see tickets')
-        .setRequired(true)
-    )
-    .addChannelOption((option) =>
-      option
-        .setName('category')
-        .setDescription('Category for tickets')
-        .addChannelTypes(ChannelType.GuildCategory)
-        .setRequired(true)
-    )
-    .addChannelOption((option) =>
-      option
-        .setName('logs')
-        .setDescription('Channel for ticket logs')
-        .setRequired(true)
-    )
-    .addIntegerOption((option) =>
-      option
-        .setName('limit')
-        .setDescription('Maximum tickets per user')
-        .setMinValue(1)
-        .setMaxValue(10)
-        .setRequired(false)
-    ),
+  data,
 
   async execute(interaction) {
-    if (!interaction.member.permissions.has('Administrator')) {
+    if (!interaction.memberPermissions.has(
+      PermissionFlagsBits.Administrator
+    )) {
       return interaction.reply({
-        content: 'You do not have `Administrator` permission to setup Tickets!',
+        content: '❌ Administrator permission required!',
         ephemeral: true,
       });
     }
-    const supportRole = interaction.options.getRole('support_role');
+
     const category = interaction.options.getChannel('category');
     const logs = interaction.options.getChannel('logs');
     const limit = interaction.options.getInteger('limit') || 3;
+
+    const supportRoleIds = [];
+
+    for (let i = 1; i <= 10; i++) {
+      const role = interaction.options.getRole(`support_role_${i}`);
+
+      if (role && !supportRoleIds.includes(role.id)) {
+        supportRoleIds.push(role.id);
+      }
+    }
+
+    if (!supportRoleIds.length) {
+      return interaction.reply({
+        content: '❌ Select at least one staff role.',
+        ephemeral: true,
+      });
+    }
 
     try {
       await TicketSettings.findOneAndUpdate(
         { guildId: interaction.guildId },
         {
-          guildId: interaction.guildId,
-          enabled: true,
-          categoryId: category.id,
-          logChannelId: logs.id,
-          supportRoleIds: [supportRole.id],
-          ticketLimit: limit,
+          $set: {
+            guildId: interaction.guildId,
+            enabled: true,
+            categoryId: category.id,
+            logChannelId: logs.id,
+            supportRoleIds,
+            ticketLimit: limit,
+          },
         },
-        { upsert: true, new: true }
+        {
+          upsert: true,
+          new: true,
+          runValidators: true,
+        }
       );
 
-      await interaction.reply({
-        content: '✅ Ticket system has been configured successfully!',
+      const roleList = supportRoleIds
+        .map(id => `<@&${id}>`)
+        .join('\n');
+
+      return interaction.reply({
+        content:
+          `✅ **OUTLAWS TICKET SYSTEM CONFIGURED**\n\n` +
+          `📂 Category: ${category}\n` +
+          `📋 Log Channel: ${logs}\n` +
+          `🛡️ Staff Roles:\n${roleList}\n\n` +
+          `🎫 Ticket Limit: ${limit}\n\n` +
+          `All selected staff roles now have ticket access.`,
         ephemeral: true,
       });
+
     } catch (error) {
-      console.error(error);
-      await interaction.reply({
-        content: '❌ An error occurred while setting up the ticket system.',
+      console.error('Ticket Setup Error:', error);
+
+      return interaction.reply({
+        content: '❌ Ticket setup failed. Check Render logs.',
         ephemeral: true,
       });
     }
